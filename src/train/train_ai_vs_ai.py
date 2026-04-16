@@ -1,5 +1,5 @@
-from pong_rl_environment import pong_environment
-from deepQ_agent import my_agent
+from src.environment.pong_rl_environment import pong_environment
+from src.agent.deepQ_agent import my_agent
 
 EPISODES = 1000
 STATE_SIZE = 8
