@@ -1,104 +1,139 @@
-import numpy as np
-from collections import deque
+import os
 import random
+from collections import deque
 
+import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-class my_agent:
-    def __init__(self,inp_shape, output_shape,loadmodel=False,trainme=True,filename="pong.keras"):
 
-        self.GAMMA = 0.97  #parameter in deep-Q formula for importance of the future steps
-        self.EPSILON = 1.0 #epsilon greedy strategy
+class my_agent:
+    def __init__(self, inp_shape, output_shape, loadmodel=False, trainme=True, filename="models/pong.keras"):
+        self.GAMMA = 0.97
+        self.EPSILON = 1.0
         self.EPSILON_MIN = 0.001
         self.EPSILON_DECAY = 0.999
-        self.BATCH_SIZE = 32 #number of random sampled items from memory that are used for a training step
-        self.MEMORY_SIZE = 100000 
-        self.LEARNING_RATE = 0.001 #learning rate of the gradient descent algorithm (<=0.001)
-        self.TRAIN_START = 100  # don't train before memory has 100 memory items
-        self.inp_shape=inp_shape #number of input neurons
-        self.output_shape=output_shape #number of output neurons (=number of actions)
-        self.step=0
-        self.n_update_target_model=1000 # update weights of target model every 1000 steps
-        self.model_filename=filename
-        self.n_save_model=150
+
+        self.BATCH_SIZE = 64
+        self.MEMORY_SIZE = 100000
+        self.LEARNING_RATE = 0.001
+        self.TRAIN_START = 100
+
+        self.inp_shape = inp_shape
+        self.output_shape = output_shape
+        self.model_filename = filename
+
+        self.step = 0
+        self.n_update_target_model = 1000
+        self.n_save_model = 50
 
         if not trainme:
-            self.EPSILON=0
-            self.EPSILON_MIN=0
+            self.EPSILON = 0.0
+            self.EPSILON_MIN = 0.0
 
-        if loadmodel:
-            self.model = tf.keras.models.load_model(self.model_filename)
-        else: 
-            self.model = self.build_model(inp_shape, output_shape)
+        self.memory = deque(maxlen=self.MEMORY_SIZE)
+        self.loss_fn = keras.losses.Huber()
+        self.optimizer = keras.optimizers.Adam(learning_rate=self.LEARNING_RATE)
 
-        #Using a target model stabilitzes the training process against overoscillations or slow learning
-        self.target_model = self.build_model(inp_shape, output_shape)
-        self.target_model.set_weights(self.model.get_weights()) #target model starts with the same weights as trained model
-
-        
-        self.memory = deque(maxlen=self.MEMORY_SIZE) #deque automatically limits the length of the memory
-        self.loss_fn = keras.losses.Huber() #loss function that is faster than mean squared error
-        self.optimizer = keras.optimizers.Adam(learning_rate=self.LEARNING_RATE)  
-
-    # --- Build Q-network ---
-    def build_model(self,inp_shape, output_shape):
-        model = tf.keras.models.Sequential()
-        model.add(tf.keras.layers.Dense(128, activation='relu', input_shape=(inp_shape,)))
-        model.add(tf.keras.layers.Dense(128, activation='relu'))
-        model.add(tf.keras.layers.Dense(128, activation='relu'))
-        model.add(tf.keras.layers.Dense(output_shape, activation='linear'))
-        model.compile(loss='mse', optimizer=tf.keras.optimizers.Adam(learning_rate=self.LEARNING_RATE))
-        return model
-
-    def train(self):
-
-        if len(self.memory)>self.TRAIN_START: #only train if memory is already large enough
-            print("train step:",self.step," epsilon:",self.EPSILON)
-            # sample random choice of states and rewards from memory and convert them to numpy arrays
-            minibatch = random.sample(self.memory, self.BATCH_SIZE)
-            states, actions, rewards, next_states,done = [
-                    np.array([data[i] for data in minibatch])
-                    for i in range(5)
-                ] #Extrahieren der einzelnen Datenkategorien aus memory und Konvertierung in numpy array
-            
-            #use target model to calculate future Qvales/rewards
-            next_Q_values = self.target_model.predict(next_states,verbose=0)
-            max_next_Q_values = np.max(next_Q_values, axis=1)
-            
-            #(1-done) yields 0 if done=True. If game is done, there is no useful next_states
-            #but we still want to collect the reward
-            target_Q_values = (rewards +(1-done)* self.GAMMA * max_next_Q_values) #Q-learning Formel
-        
-            
-            tape=tf.GradientTape()
-            with tf.GradientTape() as tape: #GradientTape ermöglicht automatisches Differenzieren und die Verfolgung der Gradienten während der Vorwärtsausführung
-                allQvalues = self.model(states, training=True)
-                Qvalues = tf.gather(allQvalues,actions,batch_dims=1) #only take Qvalues corresponding to the action
-                loss = tf.reduce_mean(self.loss_fn(target_Q_values, Qvalues)) #Loss wird berechnet (gradienten werden nachher mitberechnet durch aktives tape)
-            grads = tape.gradient(loss, self.model.trainable_variables) #gradienten für loss werden für alle Gewichte und Biase in grads gespeichert.
-            self.optimizer.apply_gradients(zip(grads,self.model.trainable_variables)) #Gewichte und Biase werden anhand der Gradienten angepasst. (nur ein Schritt Richtung Minimum pro Trainingsdurchlauf!)
-            
-            if self.step % self.n_update_target_model == 0:
-                self.update_target_model_weights()
-            
-            if self.step%self.n_save_model==0:
-                self.model.save(self.model_filename)
-                print("saved model:"+ self.model_filename)
-            
-            self.step=self.step+1
-
-    def get_action(self,state):
-        #Epsilon greedy strategy
-        if self.EPSILON > self.EPSILON_MIN:
-            self.EPSILON *= self.EPSILON_DECAY
-
-        if np.random.rand() <= self.EPSILON:
-            return random.randrange(self.output_shape) # random move
-        q_values = self.model.predict(np.asarray(state)[np.newaxis], verbose=0)[0] #AI model prediction
-        return np.argmax(q_values)
-    
-    def update_target_model_weights(self):
-        #update weights of target model with weights of trained model
+        self.model = self.load_or_create_model(loadmodel)
+        self.target_model = self.build_model()
         self.target_model.set_weights(self.model.get_weights())
 
+        self.save_model()
+
+    def build_model(self):
+        model = keras.Sequential([
+            keras.layers.Input(shape=(self.inp_shape,)),
+            keras.layers.Dense(128, activation="relu"),
+            keras.layers.Dense(128, activation="relu"),
+            keras.layers.Dense(128, activation="relu"),
+            keras.layers.Dense(self.output_shape, activation="linear")
+        ])
+
+        model.compile(
+            optimizer=keras.optimizers.Adam(learning_rate=self.LEARNING_RATE),
+            loss="mse"
+        )
+        return model
+
+    def load_or_create_model(self, loadmodel):
+        if loadmodel and os.path.isfile(self.model_filename):
+            try:
+                print(f"Lade Modell: {self.model_filename}", flush=True)
+                model = keras.models.load_model(self.model_filename, compile=False)
+
+                model.compile(
+                    optimizer=keras.optimizers.Adam(learning_rate=self.LEARNING_RATE),
+                    loss="mse"
+                )
+
+                print(f"Modell erfolgreich geladen: {self.model_filename}", flush=True)
+                return model
+
+            except Exception as e:
+                print(f"Fehler beim Laden von {self.model_filename}: {e}", flush=True)
+                print("Erstelle neues Modell...", flush=True)
+        else:
+            print(f"Kein Modell gefunden: {self.model_filename}", flush=True)
+            print("Erstelle neues Modell...", flush=True)
+
+        return self.build_model()
+
+    def save_model(self):
+        folder = os.path.dirname(self.model_filename)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+
+        self.model.save(self.model_filename)
+        print(f"Modell gespeichert: {self.model_filename}", flush=True)
+
+    def update_target_model_weights(self):
+        self.target_model.set_weights(self.model.get_weights())
+
+    def get_action(self, state):
+        if self.EPSILON > self.EPSILON_MIN:
+            self.EPSILON *= self.EPSILON_DECAY
+            self.EPSILON = max(self.EPSILON, self.EPSILON_MIN)
+
+        if np.random.rand() <= self.EPSILON:
+            return random.randrange(self.output_shape)
+
+        state_array = np.asarray(state, dtype=np.float32).reshape(1, -1)
+        q_values = self.model.predict(state_array, verbose=0)[0]
+        return int(np.argmax(q_values))
+
+    def train(self):
+        if len(self.memory) < max(self.TRAIN_START, self.BATCH_SIZE):
+            return
+
+        if self.step % 10 == 0:
+            print(f"train step: {self.step} | epsilon: {self.EPSILON:.5f}", flush=True)
+
+        minibatch = random.sample(self.memory, self.BATCH_SIZE)
+
+        states = np.array([item[0] for item in minibatch], dtype=np.float32)
+        actions = np.array([item[1] for item in minibatch], dtype=np.int32)
+        rewards = np.array([item[2] for item in minibatch], dtype=np.float32)
+        next_states = np.array([item[3] for item in minibatch], dtype=np.float32)
+        dones = np.array([item[4] for item in minibatch], dtype=np.float32)
+
+        next_q_values = self.target_model.predict(next_states, verbose=0)
+        max_next_q_values = np.max(next_q_values, axis=1)
+        target_q_values = rewards + (1.0 - dones) * self.GAMMA * max_next_q_values
+
+        with tf.GradientTape() as tape:
+            all_q_values = self.model(states, training=True)
+            chosen_q_values = tf.gather(all_q_values, actions, batch_dims=1)
+            loss = tf.reduce_mean(self.loss_fn(target_q_values, chosen_q_values))
+
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
+
+        self.step += 1
+
+        if self.step % self.n_update_target_model == 0:
+            self.update_target_model_weights()
+            print("Target-Model aktualisiert.", flush=True)
+
+        if self.step % self.n_save_model == 0:
+            self.save_model()
