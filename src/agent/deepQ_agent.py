@@ -99,7 +99,7 @@ class my_agent:
             return random.randrange(self.output_shape)
 
         state_array = np.asarray(state, dtype=np.float32).reshape(1, -1)
-        q_values = self.model.predict(state_array, verbose=0)[0]
+        q_values = self.model(state_array, training=False).numpy()[0]
         return int(np.argmax(q_values))
 
     def train(self):
@@ -117,7 +117,7 @@ class my_agent:
         next_states = np.array([item[3] for item in minibatch], dtype=np.float32)
         dones = np.array([item[4] for item in minibatch], dtype=np.float32)
 
-        next_q_values = self.target_model.predict(next_states, verbose=0)
+        next_q_values = self.target_model(next_states, training=False).numpy()
         max_next_q_values = np.max(next_q_values, axis=1)
         target_q_values = rewards + (1.0 - dones) * self.GAMMA * max_next_q_values
 

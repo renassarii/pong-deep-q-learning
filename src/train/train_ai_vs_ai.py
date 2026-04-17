@@ -1,6 +1,6 @@
 import os
 
-RENDER = False
+RENDER = True
 STATE_SIZE = 8
 ACTION_SIZE = 3
 
@@ -12,8 +12,22 @@ if not RENDER:
 
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
 
+import numpy as np
+
 from src.environment.pong_rl_environment import pong_environment
 from src.agent.deepQ_agent import my_agent
+
+
+def mirror_state(state):
+    s = np.asarray(state, dtype=np.float32).copy()
+
+    # Annahme:
+    # [ball_x, ball_y, ball_vel_x, ball_vel_y, left_paddle_y, right_paddle_y, ...]
+    s[0] = 1.0 - s[0]   # ball_x spiegeln
+    s[2] = -s[2]        # ball_vel_x invertieren
+    s[4], s[5] = s[5], s[4]  # paddles tauschen
+
+    return s
 
 
 def save_both_models(agent_right, agent_left):
@@ -29,7 +43,7 @@ def main():
     agent_right = my_agent(
         STATE_SIZE,
         ACTION_SIZE,
-        loadmodel=True,
+        loadmodel=False,
         trainme=True,
         filename=RIGHT_MODEL
     )
@@ -37,7 +51,7 @@ def main():
     agent_left = my_agent(
         STATE_SIZE,
         ACTION_SIZE,
-        loadmodel=True,
+        loadmodel=False,
         trainme=True,
         filename=LEFT_MODEL
     )
@@ -58,13 +72,16 @@ def main():
                 actionleftpaddle=2
             )
 
-            total_reward_right = 0
-            total_reward_left = 0
+            total_reward_right = 0.0
+            total_reward_left = 0.0
             steps = 0
 
             while not done:
-                action_right = agent_right.get_action(state)
-                action_left = agent_left.get_action(state)
+                state_right = np.asarray(state, dtype=np.float32)
+                state_left = mirror_state(state_right)
+
+                action_right = agent_right.get_action(state_right)
+                action_left = agent_left.get_action(state_left)
 
                 next_state, reward_right, reward_left, done = env.one_step(
                     action_right,
@@ -72,11 +89,14 @@ def main():
                     actionleftpaddle=action_left
                 )
 
+                next_state_right = np.asarray(next_state, dtype=np.float32)
+                next_state_left = mirror_state(next_state_right)
+
                 agent_right.memory.append(
-                    (state, action_right, reward_right, next_state, done)
+                    (state_right, action_right, reward_right, next_state_right, done)
                 )
                 agent_left.memory.append(
-                    (state, action_left, reward_left, next_state, done)
+                    (state_left, action_left, reward_left, next_state_left, done)
                 )
 
                 if steps % 4 == 0:
@@ -102,7 +122,6 @@ def main():
         print("\nTraining abgebrochen. Speichere Modelle...", flush=True)
         save_both_models(agent_right, agent_left)
         print("Modelle gespeichert.", flush=True)
-        return
 
 
 if __name__ == "__main__":
