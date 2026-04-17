@@ -7,9 +7,9 @@
   "batch_size": 64,
   "memory_size": 100000,
   "train_start": 100,
-  "step": 31771,
-  "episode": 1223,
+  "step": 35000,
+  "episode": 1260,
   "inp_shape": 8,
   "output_shape": 3,
-  "memory_len": 5349
+  "memory_len": 18192
 }

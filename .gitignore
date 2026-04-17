@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.keras
+*.pkl
+*.json
+*.keras
