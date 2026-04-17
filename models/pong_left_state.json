@@ -1,0 +1,15 @@
+{
+  "epsilon": 0.001,
+  "epsilon_min": 0.001,
+  "epsilon_decay": 0.999,
+  "gamma": 0.97,
+  "learning_rate": 0.001,
+  "batch_size": 64,
+  "memory_size": 100000,
+  "train_start": 100,
+  "step": 31721,
+  "episode": 1223,
+  "inp_shape": 8,
+  "output_shape": 3,
+  "memory_len": 5349
+}

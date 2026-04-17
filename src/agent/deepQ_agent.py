@@ -1,4 +1,6 @@
 import os
+import json
+import pickle
 import random
 from collections import deque
 
@@ -8,7 +10,14 @@ from tensorflow import keras
 
 
 class my_agent:
-    def __init__(self, inp_shape, output_shape, loadmodel=False, trainme=True, filename="models/pong.keras"):
+    def __init__(
+        self,
+        inp_shape,
+        output_shape,
+        loadmodel=False,
+        trainme=True,
+        filename="models/pong.keras"
+    ):
         self.GAMMA = 0.97
         self.EPSILON = 1.0
         self.EPSILON_MIN = 0.001
@@ -22,8 +31,11 @@ class my_agent:
         self.inp_shape = inp_shape
         self.output_shape = output_shape
         self.model_filename = filename
+        self.state_filename = filename.replace(".keras", "_state.json")
+        self.memory_filename = filename.replace(".keras", "_memory.pkl")
 
         self.step = 0
+        self.episode = 0
         self.n_update_target_model = 1000
         self.n_save_model = 50
 
@@ -39,7 +51,15 @@ class my_agent:
         self.target_model = self.build_model()
         self.target_model.set_weights(self.model.get_weights())
 
-        self.save_model()
+        if loadmodel:
+            self.load_training_state(load_memory=True)
+
+        print(
+            f"Agent bereit | model={self.model_filename} | "
+            f"epsilon={self.EPSILON:.6f} | episode={self.episode} | "
+            f"step={self.step} | memory={len(self.memory)}",
+            flush=True
+        )
 
     def build_model(self):
         model = keras.Sequential([
@@ -79,13 +99,86 @@ class my_agent:
 
         return self.build_model()
 
-    def save_model(self):
+    def save_model(self, episode=None, save_memory=True):
         folder = os.path.dirname(self.model_filename)
         if folder:
             os.makedirs(folder, exist_ok=True)
 
+        if episode is not None:
+            self.episode = int(episode)
+
         self.model.save(self.model_filename)
-        print(f"Modell gespeichert: {self.model_filename}", flush=True)
+
+        state_data = {
+            "epsilon": float(self.EPSILON),
+            "epsilon_min": float(self.EPSILON_MIN),
+            "epsilon_decay": float(self.EPSILON_DECAY),
+            "gamma": float(self.GAMMA),
+            "learning_rate": float(self.LEARNING_RATE),
+            "batch_size": int(self.BATCH_SIZE),
+            "memory_size": int(self.MEMORY_SIZE),
+            "train_start": int(self.TRAIN_START),
+            "step": int(self.step),
+            "episode": int(self.episode),
+            "inp_shape": int(self.inp_shape),
+            "output_shape": int(self.output_shape),
+            "memory_len": int(len(self.memory)),
+        }
+
+        with open(self.state_filename, "w", encoding="utf-8") as f:
+            json.dump(state_data, f, indent=2)
+
+        if save_memory:
+            with open(self.memory_filename, "wb") as f:
+                pickle.dump(list(self.memory), f)
+
+        print(
+            f"Modell gespeichert: {self.model_filename} | "
+            f"epsilon={self.EPSILON:.6f} | "
+            f"episode={self.episode} | "
+            f"step={self.step} | "
+            f"memory={len(self.memory)}",
+            flush=True
+        )
+
+    def load_training_state(self, load_memory=True):
+        if os.path.isfile(self.state_filename):
+            try:
+                with open(self.state_filename, "r", encoding="utf-8") as f:
+                    state_data = json.load(f)
+
+                self.EPSILON = float(state_data.get("epsilon", self.EPSILON))
+                self.step = int(state_data.get("step", self.step))
+                self.episode = int(state_data.get("episode", self.episode))
+
+                print(
+                    f"Trainingsstatus geladen: {self.state_filename} | "
+                    f"epsilon={self.EPSILON:.6f} | "
+                    f"episode={self.episode} | "
+                    f"step={self.step}",
+                    flush=True
+                )
+            except Exception as e:
+                print(f"Fehler beim Laden von {self.state_filename}: {e}", flush=True)
+        else:
+            print(f"Keine Statusdatei gefunden: {self.state_filename}", flush=True)
+
+        if load_memory and os.path.isfile(self.memory_filename):
+            try:
+                with open(self.memory_filename, "rb") as f:
+                    memory_data = pickle.load(f)
+
+                self.memory = deque(memory_data, maxlen=self.MEMORY_SIZE)
+                print(
+                    f"Replay-Memory geladen: {self.memory_filename} | "
+                    f"Einträge={len(self.memory)}",
+                    flush=True
+                )
+            except Exception as e:
+                print(f"Fehler beim Laden von {self.memory_filename}: {e}", flush=True)
+        else:
+            if load_memory:
+                print(f"Keine Memory-Datei gefunden: {self.memory_filename}", flush=True)
 
     def update_target_model_weights(self):
         self.target_model.set_weights(self.model.get_weights())
@@ -136,4 +229,4 @@ class my_agent:
             print("Target-Model aktualisiert.", flush=True)
 
         if self.step % self.n_save_model == 0:
-            self.save_model()
+            self.save_model(episode=self.episode, save_memory=True)

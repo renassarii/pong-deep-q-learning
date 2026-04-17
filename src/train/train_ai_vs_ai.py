@@ -1,5 +1,8 @@
 import os
 
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
+
 RENDER = True
 STATE_SIZE = 8
 ACTION_SIZE = 3
@@ -10,8 +13,6 @@ LEFT_MODEL = "models/pong_left.keras"
 if not RENDER:
     os.environ["SDL_VIDEODRIVER"] = "dummy"
 
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "1"
-
 import numpy as np
 
 from src.environment.pong_rl_environment import pong_environment
@@ -21,18 +22,28 @@ from src.agent.deepQ_agent import my_agent
 def mirror_state(state):
     s = np.asarray(state, dtype=np.float32).copy()
 
-    # Annahme:
-    # [ball_x, ball_y, ball_vel_x, ball_vel_y, left_paddle_y, right_paddle_y, ...]
-    s[0] = 1.0 - s[0]   # ball_x spiegeln
-    s[2] = -s[2]        # ball_vel_x invertieren
-    s[4], s[5] = s[5], s[4]  # paddles tauschen
+    # Original:
+    # [ball_x, ball_y, ball_vel_x, ball_vel_y, left_x, left_y, right_x, right_y]
+
+    # Ball spiegeln
+    s[0] = 1.0 - s[0]
+    s[2] = -s[2]
+
+    # Paddles spiegeln + Seiten tauschen
+    left_x_old, left_y_old = s[4], s[5]
+    right_x_old, right_y_old = s[6], s[7]
+
+    s[4] = 1.0 - right_x_old
+    s[5] = right_y_old
+    s[6] = 1.0 - left_x_old
+    s[7] = left_y_old
 
     return s
 
 
-def save_both_models(agent_right, agent_left):
-    agent_right.save_model()
-    agent_left.save_model()
+def save_both_models(agent_right, agent_left, episode):
+    agent_right.save_model(episode=episode, save_memory=True)
+    agent_left.save_model(episode=episode, save_memory=True)
 
 
 def main():
@@ -43,7 +54,7 @@ def main():
     agent_right = my_agent(
         STATE_SIZE,
         ACTION_SIZE,
-        loadmodel=False,
+        loadmodel=True,
         trainme=True,
         filename=RIGHT_MODEL
     )
@@ -51,7 +62,7 @@ def main():
     agent_left = my_agent(
         STATE_SIZE,
         ACTION_SIZE,
-        loadmodel=False,
+        loadmodel=True,
         trainme=True,
         filename=LEFT_MODEL
     )
@@ -61,10 +72,12 @@ def main():
     print(f"Left model path: {LEFT_MODEL}", flush=True)
 
     try:
-        episode = 0
+        episode = max(agent_right.episode, agent_left.episode)
 
         while True:
             episode += 1
+            agent_right.episode = episode
+            agent_left.episode = episode
 
             state, reward_right, reward_left, done = env.one_step(
                 2,
@@ -118,9 +131,12 @@ def main():
                 flush=True
             )
 
+            if episode % 10 == 0:
+                save_both_models(agent_right, agent_left, episode)
+
     except KeyboardInterrupt:
         print("\nTraining abgebrochen. Speichere Modelle...", flush=True)
-        save_both_models(agent_right, agent_left)
+        save_both_models(agent_right, agent_left, episode)
         print("Modelle gespeichert.", flush=True)
 
 
