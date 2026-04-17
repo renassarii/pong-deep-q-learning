@@ -1,10 +1,11 @@
-import pygame
-pygame.init()
+import os
 import random
+import pygame
+
+pygame.init()
 
 WIDTH, HEIGHT = 700, 500
-WIN = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Pong")
+WIN = None
 
 FPS = 160
 
@@ -50,11 +51,11 @@ class Ball:
         self.x = self.original_x = x
         self.y = self.original_y = y
         self.radius = radius
-        self.x_vel = self.MAX_VEL
-        self.y_vel = 0
+        self.x_vel = random.choice([-1, 1]) * self.MAX_VEL
+        self.y_vel = random.uniform(-0.6 * self.MAX_VEL, 0.6 * self.MAX_VEL)
 
     def draw(self, win):
-        pygame.draw.circle(win, self.COLOR, (self.x, self.y), self.radius)
+        pygame.draw.circle(win, self.COLOR, (int(self.x), int(self.y)), self.radius)
 
     def move(self):
         self.x += self.x_vel
@@ -63,18 +64,18 @@ class Ball:
     def reset(self):
         self.x = self.original_x
         self.y = self.original_y
-        self.y_vel = 0
-        self.x_vel *= -1
+        self.x_vel = random.choice([-1, 1]) * self.MAX_VEL
+        self.y_vel = random.uniform(-0.6 * self.MAX_VEL, 0.6 * self.MAX_VEL)
 
 
 def draw(win, paddles, ball, left_score, right_score):
     win.fill(BLACK)
 
-    left_score_text = SCORE_FONT.render(f"{left_score}", 1, WHITE)
-    right_score_text = SCORE_FONT.render(f"{right_score}", 1, WHITE)
+    left_score_text = SCORE_FONT.render(f"{left_score}", True, WHITE)
+    right_score_text = SCORE_FONT.render(f"{right_score}", True, WHITE)
 
     win.blit(left_score_text, (WIDTH // 4 - left_score_text.get_width() // 2, 20))
-    win.blit(right_score_text, (WIDTH * (3 / 4) - right_score_text.get_width() // 2, 20))
+    win.blit(right_score_text, (int(WIDTH * 3 / 4) - right_score_text.get_width() // 2, 20))
 
     for paddle in paddles:
         paddle.draw(win)
@@ -89,8 +90,8 @@ def draw(win, paddles, ball, left_score, right_score):
 
 
 def handle_collision(ball, left_paddle, right_paddle):
-    reward = 0
-    rewardleft = 0
+    reward_right = 0
+    reward_left = 0
 
     if ball.y + ball.radius >= HEIGHT:
         ball.y_vel *= -1
@@ -105,9 +106,8 @@ def handle_collision(ball, left_paddle, right_paddle):
                 middle_y = left_paddle.y + left_paddle.height / 2
                 difference_in_y = middle_y - ball.y
                 reduction_factor = (left_paddle.height / 2) / ball.MAX_VEL
-                y_vel = difference_in_y / reduction_factor
-                ball.y_vel = -1 * y_vel
-                rewardleft = 0.2
+                ball.y_vel = -difference_in_y / reduction_factor
+                reward_left = 0.2
     else:
         if right_paddle.y <= ball.y <= right_paddle.y + right_paddle.height:
             if ball.x + ball.radius >= right_paddle.x:
@@ -116,11 +116,10 @@ def handle_collision(ball, left_paddle, right_paddle):
                 middle_y = right_paddle.y + right_paddle.height / 2
                 difference_in_y = middle_y - ball.y
                 reduction_factor = (right_paddle.height / 2) / ball.MAX_VEL
-                y_vel = difference_in_y / reduction_factor
-                ball.y_vel = -1 * y_vel
-                reward = 0.2
+                ball.y_vel = -difference_in_y / reduction_factor
+                reward_right = 0.2
 
-    return reward, rewardleft
+    return reward_right, reward_left
 
 
 def handle_paddle_movement(keys, actionrightpaddle, human, actionleftpaddle, left_paddle, right_paddle):
@@ -143,12 +142,17 @@ def handle_paddle_movement(keys, actionrightpaddle, human, actionleftpaddle, lef
 
 class pong_environment:
     def __init__(self, **kwargs):
-        self.render = False
-        for key, value in kwargs.items():
-            self.render = value
+        global WIN
+
+        self.render = kwargs.get("render", False)
 
         if self.render:
             print("Rendering on")
+            if pygame.display.get_surface() is None:
+                WIN = pygame.display.set_mode((WIDTH, HEIGHT))
+                pygame.display.set_caption("Pong")
+            else:
+                WIN = pygame.display.get_surface()
         else:
             print("Rendering off")
 
@@ -166,12 +170,12 @@ class pong_environment:
     def one_step(self, actionrightpaddle, human=True, actionleftpaddle=2):
         if self.render:
             self.clock.tick(FPS)
-            draw(WIN, [self.left_paddle, self.right_paddle], self.ball, self.left_score, self.right_score)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                break
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    raise SystemExit
+
+            draw(WIN, [self.left_paddle, self.right_paddle], self.ball, self.left_score, self.right_score)
 
         if human:
             keys = pygame.key.get_pressed()
@@ -189,22 +193,22 @@ class pong_environment:
 
         self.ball.move()
 
-        reward = 0
-        rewardleft = 0
+        reward_right = 0
+        reward_left = 0
 
-        rewright, rewleft = handle_collision(self.ball, self.left_paddle, self.right_paddle)
-        reward += rewright
-        rewardleft += rewleft
+        hit_reward_right, hit_reward_left = handle_collision(self.ball, self.left_paddle, self.right_paddle)
+        reward_right += hit_reward_right
+        reward_left += hit_reward_left
 
         if self.ball.x < 0:
             self.right_score += 1
-            reward = 1
-            rewardleft -= 1
+            reward_right += 1
+            reward_left -= 1
             self.ball.reset()
         elif self.ball.x > WIDTH:
             self.left_score += 1
-            reward = -1
-            rewardleft += 1
+            reward_right -= 1
+            reward_left += 1
             self.ball.reset()
 
         won = False
@@ -217,7 +221,7 @@ class pong_environment:
 
         if won:
             if self.render:
-                text = SCORE_FONT.render(win_text, 1, WHITE)
+                text = SCORE_FONT.render(win_text, True, WHITE)
                 WIN.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2 - text.get_height() // 2))
                 pygame.display.update()
                 pygame.time.delay(1000)
@@ -228,28 +232,16 @@ class pong_environment:
             self.left_score = 0
             self.right_score = 0
 
-        balldata = [
+        state = [
             self.ball.x / WIDTH,
             self.ball.y / HEIGHT,
             self.ball.x_vel / self.ball.MAX_VEL,
-            self.ball.y_vel / self.ball.MAX_VEL
-        ]
-
-        paddledata = [
+            self.ball.y_vel / self.ball.MAX_VEL,
             self.left_paddle.x / WIDTH,
             self.left_paddle.y / HEIGHT,
             self.right_paddle.x / WIDTH,
-            self.right_paddle.y / HEIGHT
+            self.right_paddle.y / HEIGHT,
         ]
 
-        done = abs(reward) == 1
-        return balldata + paddledata, reward, rewardleft, done
-
-
-if __name__ == "__main__":
-    env = pong_environment(render=True)
-
-    while True:
-        randaction = random.randint(0, 2)
-        actionrightpaddle = randaction
-        positiondata, reward, rewardleft, done = env.one_step(actionrightpaddle)
+        done = abs(reward_right) >= 1 or abs(reward_left) >= 1
+        return state, reward_right, reward_left, done
